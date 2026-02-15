@@ -39,7 +39,7 @@ class PageViewController extends Controller
         $yesterday = PageView::whereDate('created_at', Carbon::yesterday())->count();
         $thisWeek = PageView::where('created_at', '>=', Carbon::now()->startOfWeek())->count();
         $thisMonth = PageView::where('created_at', '>=', Carbon::now()->startOfMonth())->count();
-        $uniqueVisitors = PageView::distinct('ip')->count('ip');
+        $uniqueVisitors = PageView::select(DB::raw('COUNT(DISTINCT ip) as count'))->value('count');
 
         // Growth: compare today vs yesterday
         $growthPercent = $yesterday > 0 ? round((($today - $yesterday) / $yesterday) * 100) : ($today > 0 ? 100 : 0);
