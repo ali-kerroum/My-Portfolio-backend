@@ -97,25 +97,89 @@ class ProjectController extends Controller
     }
 
     /**
-     * Upload a file (image or video) for projects.
+     * Check if Cloudinary is properly configured (not a placeholder).
+     */
+    private function isCloudinaryConfigured(): bool
+    {
+        $url = env('CLOUDINARY_URL');
+        if (!$url) return false;
+        $parsed = parse_url($url);
+        $cloudName = $parsed['host'] ?? '';
+        // Reject placeholder values
+        return $cloudName && $cloudName !== 'CLOUD_NAME' && !str_contains($cloudName, 'YOUR_');
+    }
+
+    /**
+     * Return a signed Cloudinary upload signature.
+     * The frontend uploads directly to Cloudinary (bypasses Render's 30s timeout).
+     */
+    public function cloudinarySignature(Request $request)
+    {
+        if (!$this->isCloudinaryConfigured()) {
+            return response()->json(['message' => 'Cloudinary not configured', 'use_server' => true], 422);
+        }
+
+        $request->validate([
+            'folder' => 'nullable|string',
+        ]);
+
+        $parsed = parse_url(env('CLOUDINARY_URL'));
+        $apiKey = $parsed['user'] ?? '';
+        $apiSecret = urldecode($parsed['pass'] ?? '');
+        $cloudName = $parsed['host'] ?? '';
+
+        $timestamp = time();
+        $folder = $request->input('folder', 'projects');
+
+        $paramsToSign = "folder={$folder}&timestamp={$timestamp}";
+        $signature = sha1($paramsToSign . $apiSecret);
+
+        return response()->json([
+            'signature' => $signature,
+            'timestamp' => $timestamp,
+            'cloud_name' => $cloudName,
+            'api_key' => $apiKey,
+            'folder' => $folder,
+        ]);
+    }
+
+    /**
+     * Upload a file (image or video) via server.
+     * Uses Cloudinary if properly configured, otherwise local storage.
      */
     public function uploadFile(Request $request)
     {
         $request->validate([
-            'file' => 'required|file|mimes:jpeg,png,jpg,gif,webp,mp4,webm,mov,avi|max:51200',
+            'file' => 'required|file|mimes:jpeg,png,jpg,gif,webp,mp4,webm,mov,avi|max:102400',
         ]);
 
         $file = $request->file('file');
         $isVideo = str_starts_with($file->getMimeType(), 'video/');
-        if ($isVideo) {
-            // Upload video to Cloudinary
-            $uploadedFileUrl = Cloudinary::uploadVideo($file->getRealPath(), [
-                'folder' => 'projects/videos'
-            ])->getSecurePath();
-            $url = $uploadedFileUrl;
+
+        if ($this->isCloudinaryConfigured()) {
+            try {
+                if ($isVideo) {
+                    $uploadedFile = Cloudinary::uploadVideo($file->getRealPath(), [
+                        'folder' => 'projects/videos',
+                        'resource_type' => 'video',
+                        'chunk_size' => 6000000,
+                        'timeout' => 600,
+                    ]);
+                } else {
+                    $uploadedFile = Cloudinary::upload($file->getRealPath(), [
+                        'folder' => 'projects/images',
+                        'timeout' => 120,
+                    ]);
+                }
+                $url = $uploadedFile->getSecurePath();
+            } catch (\Exception $e) {
+                return response()->json([
+                    'message' => 'Cloudinary upload failed: ' . $e->getMessage(),
+                ], 500);
+            }
         } else {
-            // Store image locally as before
-            $folder = 'projects/images';
+            // Local storage fallback
+            $folder = $isVideo ? 'projects/videos' : 'projects/images';
             $path = $file->store($folder, 'public');
             $url = url('storage/' . $path);
         }

@@ -1,5 +1,8 @@
 FROM php:8.2-cli
 
+# Custom PHP config for large file uploads
+COPY docker/php.ini /usr/local/etc/php/conf.d/uploads.ini
+
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     git \

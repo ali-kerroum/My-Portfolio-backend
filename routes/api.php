@@ -57,6 +57,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::put('/projects/{project}', [ProjectController::class, 'update']);
     Route::delete('/projects/{project}', [ProjectController::class, 'destroy']);
     Route::post('/projects/reorder', [ProjectController::class, 'reorder']);
+    Route::get('/cloudinary-signature', [ProjectController::class, 'cloudinarySignature']);
     Route::post('/upload-file', [ProjectController::class, 'uploadFile']);
 
     // Experiences CRUD
