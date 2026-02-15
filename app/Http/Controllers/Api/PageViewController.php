@@ -11,6 +11,22 @@ use Illuminate\Support\Facades\DB;
 class PageViewController extends Controller
 {
     /**
+     * Get the real client IP, accounting for reverse proxies.
+     */
+    private function getRealIp(Request $request): string
+    {
+        // X-Forwarded-For may contain: client, proxy1, proxy2
+        $forwarded = $request->header('X-Forwarded-For');
+        if ($forwarded) {
+            $ips = array_map('trim', explode(',', $forwarded));
+            if (!empty($ips[0]) && filter_var($ips[0], FILTER_VALIDATE_IP)) {
+                return $ips[0];
+            }
+        }
+        return $request->ip();
+    }
+
+    /**
      * Record a page view (public endpoint).
      */
     public function store(Request $request)
@@ -21,7 +37,7 @@ class PageViewController extends Controller
 
         PageView::create([
             'page' => $validated['page'] ?? '/',
-            'ip' => $request->ip(),
+            'ip' => $this->getRealIp($request),
             'user_agent' => $request->userAgent(),
             'referrer' => $request->header('referer'),
         ]);
@@ -71,20 +87,45 @@ class PageViewController extends Controller
             ->limit(5)
             ->get();
 
-        // Top referrers
-        $topReferrers = PageView::select('referrer', DB::raw('COUNT(*) as count'))
-            ->whereNotNull('referrer')
-            ->where('referrer', '!=', '')
-            ->groupBy('referrer')
-            ->orderByDesc('count')
-            ->limit(5)
+        // Visits by day of week
+        $driver = DB::getDriverName();
+        $dowExpr = $driver === 'sqlite'
+            ? DB::raw('strftime("%w", created_at) as dow')  // 0=Sun, 6=Sat
+            : DB::raw('EXTRACT(DOW FROM created_at) as dow');
+
+        $dowRaw = PageView::select($dowExpr, DB::raw('COUNT(*) as count'))
+            ->groupBy('dow')
+            ->orderBy('dow')
             ->get()
-            ->map(function ($item) {
-                // Extract domain from referrer URL
-                $parsed = parse_url($item->referrer);
-                $item->domain = $parsed['host'] ?? $item->referrer;
-                return $item;
-            });
+            ->pluck('count', 'dow')
+            ->toArray();
+
+        $dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        $dayOfWeek = [];
+        for ($d = 0; $d < 7; $d++) {
+            $key = (string) $d;
+            $dayOfWeek[] = ['day' => $dayNames[$d], 'count' => (int) ($dowRaw[$key] ?? 0)];
+        }
+
+        // New vs returning visitors
+        $todayIps = DB::table('page_views')
+            ->whereDate('created_at', Carbon::today())
+            ->distinct()
+            ->pluck('ip');
+
+        $newToday = 0;
+        $returningToday = 0;
+        foreach ($todayIps as $ip) {
+            $existed = DB::table('page_views')
+                ->where('ip', $ip)
+                ->whereDate('created_at', '<', Carbon::today())
+                ->exists();
+            if ($existed) {
+                $returningToday++;
+            } else {
+                $newToday++;
+            }
+        }
 
         // Browser breakdown (parse user_agent)
         $browsers = PageView::select('user_agent', DB::raw('COUNT(*) as count'))
@@ -117,7 +158,6 @@ class PageViewController extends Controller
         $desktopCount = $total - $mobileCount;
 
         // Peak hours (24h distribution) — compatible with both SQLite and PostgreSQL
-        $driver = DB::getDriverName();
         $hourExpr = $driver === 'sqlite'
             ? DB::raw('strftime("%H", created_at) as hour')
             : DB::raw('TO_CHAR(created_at, \'HH24\') as hour');
@@ -152,7 +192,9 @@ class PageViewController extends Controller
             'daily' => $daily,
             'monthly' => $monthly,
             'top_pages' => $topPages,
-            'top_referrers' => $topReferrers,
+            'day_of_week' => $dayOfWeek,
+            'new_visitors_today' => $newToday,
+            'returning_visitors_today' => $returningToday,
             'browsers' => $browsers,
             'devices' => ['mobile' => $mobileCount, 'desktop' => $desktopCount],
             'peak_hours' => $peakHours,
