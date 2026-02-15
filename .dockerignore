@@ -1,0 +1,6 @@
+/vendor
+/node_modules
+/.env
+/database/*.sqlite
+/storage/app/public
+/bootstrap/cache/*.php
