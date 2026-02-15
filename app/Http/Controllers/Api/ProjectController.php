@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Project;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
+use CloudinaryLabs\CloudinaryLaravel\Facades\Cloudinary;
 
 class ProjectController extends Controller
 {
@@ -106,11 +107,21 @@ class ProjectController extends Controller
 
         $file = $request->file('file');
         $isVideo = str_starts_with($file->getMimeType(), 'video/');
-        $folder = $isVideo ? 'projects/videos' : 'projects/images';
-        $path = $file->store($folder, 'public');
+        if ($isVideo) {
+            // Upload video to Cloudinary
+            $uploadedFileUrl = Cloudinary::uploadVideo($file->getRealPath(), [
+                'folder' => 'projects/videos'
+            ])->getSecurePath();
+            $url = $uploadedFileUrl;
+        } else {
+            // Store image locally as before
+            $folder = 'projects/images';
+            $path = $file->store($folder, 'public');
+            $url = url('storage/' . $path);
+        }
 
         return response()->json([
-            'url' => url('storage/' . $path),
+            'url' => $url,
             'type' => $isVideo ? 'video' : 'image',
             'name' => $file->getClientOriginalName(),
         ]);
