@@ -87,45 +87,53 @@ class PageViewController extends Controller
             ->limit(5)
             ->get();
 
-        // Visits by day of week
-        $driver = DB::getDriverName();
-        $dowExpr = $driver === 'sqlite'
-            ? DB::raw('strftime("%w", created_at) as dow')  // 0=Sun, 6=Sat
-            : DB::raw('EXTRACT(DOW FROM created_at) as dow');
+        // Estimate sessions: group consecutive views from same IP within 30 min
+        $viewsByIp = PageView::orderBy('created_at')
+            ->get(['ip', 'created_at'])
+            ->groupBy('ip');
 
-        $dowRaw = PageView::select($dowExpr, DB::raw('COUNT(*) as count'))
-            ->groupBy('dow')
-            ->orderBy('dow')
-            ->get()
-            ->pluck('count', 'dow')
-            ->toArray();
+        $sessions = [];
+        foreach ($viewsByIp as $ip => $views) {
+            $sessionStart = null;
+            $sessionEnd = null;
+            $sessionPages = 0;
 
-        $dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-        $dayOfWeek = [];
-        for ($d = 0; $d < 7; $d++) {
-            $key = (string) $d;
-            $dayOfWeek[] = ['day' => $dayNames[$d], 'count' => (int) ($dowRaw[$key] ?? 0)];
-        }
+            foreach ($views as $view) {
+                $viewTime = Carbon::parse($view->created_at);
 
-        // New vs returning visitors
-        $todayIps = DB::table('page_views')
-            ->whereDate('created_at', Carbon::today())
-            ->distinct()
-            ->pluck('ip');
-
-        $newToday = 0;
-        $returningToday = 0;
-        foreach ($todayIps as $ip) {
-            $existed = DB::table('page_views')
-                ->where('ip', $ip)
-                ->whereDate('created_at', '<', Carbon::today())
-                ->exists();
-            if ($existed) {
-                $returningToday++;
-            } else {
-                $newToday++;
+                if ($sessionStart === null) {
+                    $sessionStart = $viewTime;
+                    $sessionEnd = $viewTime;
+                    $sessionPages = 1;
+                } elseif ($viewTime->diffInMinutes($sessionEnd) <= 30) {
+                    $sessionEnd = $viewTime;
+                    $sessionPages++;
+                } else {
+                    $sessions[] = [
+                        'duration' => $sessionStart->diffInSeconds($sessionEnd),
+                        'pages' => $sessionPages,
+                    ];
+                    $sessionStart = $viewTime;
+                    $sessionEnd = $viewTime;
+                    $sessionPages = 1;
+                }
+            }
+            if ($sessionStart) {
+                $sessions[] = [
+                    'duration' => $sessionStart->diffInSeconds($sessionEnd),
+                    'pages' => $sessionPages,
+                ];
             }
         }
+
+        $totalSessions = count($sessions);
+        $sessionsCollection = collect($sessions);
+        $avgSessionDuration = $totalSessions > 0 ? round($sessionsCollection->avg('duration')) : 0;
+        $avgPagesPerSession = $totalSessions > 0 ? round($sessionsCollection->avg('pages'), 1) : 0;
+        $bounceRate = $totalSessions > 0
+            ? round($sessionsCollection->where('pages', 1)->count() / $totalSessions * 100)
+            : 0;
+        $longestSession = $totalSessions > 0 ? $sessionsCollection->max('duration') : 0;
 
         // Browser breakdown (parse user_agent)
         $browsers = PageView::select('user_agent', DB::raw('COUNT(*) as count'))
@@ -158,6 +166,7 @@ class PageViewController extends Controller
         $desktopCount = $total - $mobileCount;
 
         // Peak hours (24h distribution) — compatible with both SQLite and PostgreSQL
+        $driver = DB::getDriverName();
         $hourExpr = $driver === 'sqlite'
             ? DB::raw('strftime("%H", created_at) as hour')
             : DB::raw('TO_CHAR(created_at, \'HH24\') as hour');
@@ -192,9 +201,13 @@ class PageViewController extends Controller
             'daily' => $daily,
             'monthly' => $monthly,
             'top_pages' => $topPages,
-            'day_of_week' => $dayOfWeek,
-            'new_visitors_today' => $newToday,
-            'returning_visitors_today' => $returningToday,
+            'session_insights' => [
+                'avg_duration' => $avgSessionDuration,
+                'avg_pages' => $avgPagesPerSession,
+                'bounce_rate' => $bounceRate,
+                'total_sessions' => $totalSessions,
+                'longest_session' => $longestSession,
+            ],
             'browsers' => $browsers,
             'devices' => ['mobile' => $mobileCount, 'desktop' => $desktopCount],
             'peak_hours' => $peakHours,
