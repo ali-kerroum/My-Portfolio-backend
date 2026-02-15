@@ -116,8 +116,13 @@ class PageViewController extends Controller
             })->count();
         $desktopCount = $total - $mobileCount;
 
-        // Peak hours (24h distribution)
-        $hourly = PageView::select(DB::raw('strftime("%H", created_at) as hour'), DB::raw('COUNT(*) as count'))
+        // Peak hours (24h distribution) — compatible with both SQLite and PostgreSQL
+        $driver = DB::getDriverName();
+        $hourExpr = $driver === 'sqlite'
+            ? DB::raw('strftime("%H", created_at) as hour')
+            : DB::raw('TO_CHAR(created_at, \'HH24\') as hour');
+
+        $hourly = PageView::select($hourExpr, DB::raw('COUNT(*) as count'))
             ->groupBy('hour')
             ->orderBy('hour')
             ->get()
