@@ -190,6 +190,68 @@ class PageViewController extends Controller
             ->limit(10)
             ->get(['page', 'ip', 'referrer', 'created_at']);
 
+        // OS Breakdown (parse user_agent)
+        $osBreakdown = PageView::select('user_agent', DB::raw('COUNT(*) as count'))
+            ->whereNotNull('user_agent')
+            ->groupBy('user_agent')
+            ->get()
+            ->groupBy(function ($item) {
+                $ua = $item->user_agent;
+                if (str_contains($ua, 'Windows')) return 'Windows';
+                if (str_contains($ua, 'Macintosh') || str_contains($ua, 'Mac OS')) return 'macOS';
+                if (str_contains($ua, 'iPhone') || str_contains($ua, 'iPad')) return 'iOS';
+                if (str_contains($ua, 'Android')) return 'Android';
+                if (str_contains($ua, 'Linux')) return 'Linux';
+                if (str_contains($ua, 'CrOS')) return 'ChromeOS';
+                return 'Other';
+            })
+            ->map(function ($group, $name) {
+                return ['name' => $name, 'count' => $group->sum('count')];
+            })
+            ->sortByDesc('count')
+            ->values();
+
+        // Engagement funnel: % of unique IPs that viewed each section
+        $totalUniqueIps = DB::table('page_views')->distinct()->count('ip') ?: 1;
+        $funnelSections = ['/', '/#hero', '/#about', '/#experience', '/#services', '/#projects', '/#contact'];
+        $funnel = [];
+        foreach ($funnelSections as $section) {
+            $count = DB::table('page_views')
+                ->where('page', $section)
+                ->distinct()
+                ->count('ip');
+            $funnel[] = [
+                'section' => $section,
+                'visitors' => $count,
+                'percent' => round(($count / $totalUniqueIps) * 100),
+            ];
+        }
+
+        // Weekly comparison: this week vs last week
+        $lastWeekStart = Carbon::now()->startOfWeek()->subWeek();
+        $lastWeekEnd = Carbon::now()->startOfWeek()->subSecond();
+        $lastWeek = PageView::whereBetween('created_at', [$lastWeekStart, $lastWeekEnd])->count();
+        $lastWeekUnique = DB::table('page_views')
+            ->whereBetween('created_at', [$lastWeekStart, $lastWeekEnd])
+            ->distinct()->count('ip');
+        $thisWeekUnique = DB::table('page_views')
+            ->where('created_at', '>=', Carbon::now()->startOfWeek())
+            ->distinct()->count('ip');
+        $weekViewsChange = $lastWeek > 0 ? round((($thisWeek - $lastWeek) / $lastWeek) * 100) : ($thisWeek > 0 ? 100 : 0);
+        $weekVisitorsChange = $lastWeekUnique > 0 ? round((($thisWeekUnique - $lastWeekUnique) / $lastWeekUnique) * 100) : ($thisWeekUnique > 0 ? 100 : 0);
+
+        // Views per month (last 6 months)
+        $monthlyTrend = [];
+        for ($i = 5; $i >= 0; $i--) {
+            $monthStart = Carbon::now()->startOfMonth()->subMonths($i);
+            $monthEnd = (clone $monthStart)->endOfMonth();
+            $monthlyTrend[] = [
+                'month' => $monthStart->format('M Y'),
+                'short' => $monthStart->format('M'),
+                'count' => PageView::whereBetween('created_at', [$monthStart, $monthEnd])->count(),
+            ];
+        }
+
         return response()->json([
             'total' => $total,
             'today' => $today,
@@ -212,6 +274,17 @@ class PageViewController extends Controller
             'devices' => ['mobile' => $mobileCount, 'desktop' => $desktopCount],
             'peak_hours' => $peakHours,
             'recent_views' => $recentViews,
+            'os_breakdown' => $osBreakdown,
+            'engagement_funnel' => $funnel,
+            'weekly_comparison' => [
+                'this_week_views' => $thisWeek,
+                'last_week_views' => $lastWeek,
+                'views_change' => $weekViewsChange,
+                'this_week_visitors' => $thisWeekUnique,
+                'last_week_visitors' => $lastWeekUnique,
+                'visitors_change' => $weekVisitorsChange,
+            ],
+            'monthly_trend' => $monthlyTrend,
         ]);
     }
 }
