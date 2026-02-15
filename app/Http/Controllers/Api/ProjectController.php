@@ -101,7 +101,7 @@ class ProjectController extends Controller
      */
     private function isCloudinaryConfigured(): bool
     {
-        $url = env('CLOUDINARY_URL');
+        $url = config('cloudinary.url');
         if (!$url) return false;
         $parsed = parse_url($url);
         $cloudName = $parsed['host'] ?? '';
@@ -123,7 +123,7 @@ class ProjectController extends Controller
             'folder' => 'nullable|string',
         ]);
 
-        $parsed = parse_url(env('CLOUDINARY_URL'));
+        $parsed = parse_url(config('cloudinary.url'));
         $apiKey = $parsed['user'] ?? '';
         $apiSecret = urldecode($parsed['pass'] ?? '');
         $cloudName = $parsed['host'] ?? '';
