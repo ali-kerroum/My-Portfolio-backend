@@ -25,16 +25,16 @@ fi
 # Run package discovery
 php artisan package:discover --ansi
 
+# Clear any old config cache so env() works during migrations/seeding
+php artisan config:clear
+
 # Run migrations
 php artisan migrate --force
 
-# Seed database (only if users table is empty)
-USER_COUNT=$(php artisan tinker --execute="echo \App\Models\User::count();" 2>/dev/null || echo "0")
-if [ "$USER_COUNT" = "0" ]; then
-    php artisan db:seed --force
-fi
+# Seed database (always run to ensure admin credentials are correct)
+php artisan db:seed --force
 
-# Cache config & routes for performance
+# NOW cache config & routes for performance
 php artisan config:cache
 php artisan route:cache
 php artisan view:cache
