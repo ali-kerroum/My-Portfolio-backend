@@ -1,8 +1,8 @@
 #!/bin/bash
 set -e
 
-# Install PHP dependencies
-composer install --no-dev --optimize-autoloader
+# Install PHP dependencies (skip scripts, run them after env is ready)
+composer install --no-dev --optimize-autoloader --no-scripts
 
 # Copy .env if not exists
 if [ ! -f .env ]; then
@@ -11,6 +11,10 @@ fi
 
 # Generate app key if not set
 php artisan key:generate --force
+
+# Now run composer scripts (package:discover etc.)
+composer dump-autoload --optimize 2>/dev/null || true
+php artisan package:discover --ansi || true
 
 # Run migrations
 php artisan migrate --force
