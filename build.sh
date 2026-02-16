@@ -17,8 +17,10 @@ if [ ! -f .env ]; then
     cp .env.example .env
 fi
 
-# Generate app key if not set
-php artisan key:generate --force
+# Only generate key if APP_KEY env var is not set
+if [ -z "$APP_KEY" ]; then
+    php artisan key:generate --force
+fi
 
 # Run package discovery
 php artisan package:discover --ansi
@@ -36,6 +38,11 @@ fi
 php artisan config:cache
 php artisan route:cache
 php artisan view:cache
+
+# Debug: show key status
+echo "APP_KEY is set: $([ -n \"$APP_KEY\" ] && echo 'YES' || echo 'NO')"
+echo "DB_CONNECTION: $DB_CONNECTION"
+echo "DATABASE_URL set: $([ -n \"$DATABASE_URL\" ] && echo 'YES' || echo 'NO')"
 
 # Create storage symlink (only for local storage)
 php artisan storage:link 2>/dev/null || true
