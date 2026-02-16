@@ -1,6 +1,14 @@
 #!/bin/bash
 set -e
 
+# Sanitize env vars - strip CR/LF/Tab characters that break Laravel
+export APP_URL=$(printf '%s' "$APP_URL" | tr -d '\r\n\t')
+export APP_KEY=$(printf '%s' "$APP_KEY" | tr -d '\r\n\t')
+export DATABASE_URL=$(printf '%s' "$DATABASE_URL" | tr -d '\r\n\t')
+export CLOUDINARY_URL=$(printf '%s' "$CLOUDINARY_URL" | tr -d '\r\n\t')
+export ADMIN_EMAIL=$(printf '%s' "$ADMIN_EMAIL" | tr -d '\r\n\t')
+export ADMIN_PASSWORD=$(printf '%s' "$ADMIN_PASSWORD" | tr -d '\r\n\t')
+
 # Install PHP dependencies (skip scripts, run them after env is ready)
 composer install --no-dev --optimize-autoloader --no-scripts
 
@@ -12,9 +20,8 @@ fi
 # Generate app key if not set
 php artisan key:generate --force
 
-# Now run composer scripts (package:discover etc.)
-composer dump-autoload --optimize 2>/dev/null || true
-php artisan package:discover --ansi || true
+# Run package discovery
+php artisan package:discover --ansi
 
 # Run migrations
 php artisan migrate --force
