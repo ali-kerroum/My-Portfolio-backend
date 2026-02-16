@@ -33,12 +33,6 @@ RUN composer install --no-dev --optimize-autoloader --no-scripts
 # Copy the rest of the application
 COPY . .
 
-# Copy .env.example to .env if .env doesn't exist
-RUN cp -n .env.example .env || true
-
-# Run composer scripts (post-autoload-dump etc.)
-RUN composer dump-autoload --optimize
-
 # Set permissions
 RUN chmod -R 775 storage bootstrap/cache
 RUN chmod +x build.sh
