@@ -18,29 +18,16 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
-        // Admin user
+        // Admin user (only create if no users exist)
         $adminEmail = env('ADMIN_EMAIL', 'admin@portfolio.com');
         $adminPassword = env('ADMIN_PASSWORD', 'changeme123');
-        
-        $user = User::where('email', $adminEmail)->first();
-        if ($user) {
-            $user->update(['password' => Hash::make($adminPassword)]);
-        } else {
-            // Try to find any user and update email+password
-            $user = User::first();
-            if ($user) {
-                $user->update([
-                    'email' => $adminEmail,
-                    'password' => Hash::make($adminPassword),
-                ]);
-            } else {
-                User::create([
-                    'name' => 'Admin',
-                    'email' => $adminEmail,
-                    'password' => Hash::make($adminPassword),
-                ]);
-            }
-        }
+        User::firstOrCreate(
+            ['email' => $adminEmail],
+            [
+                'name' => 'Admin',
+                'password' => Hash::make($adminPassword),
+            ]
+        );
 
         // Projects
         Project::create([

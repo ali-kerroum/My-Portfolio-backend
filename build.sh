@@ -31,8 +31,35 @@ php artisan config:clear
 # Run migrations
 php artisan migrate --force
 
-# Seed database (always run to ensure admin credentials are correct)
-php artisan db:seed --force
+# Seed database only if empty (first deploy)
+USER_COUNT=$(php artisan tinker --execute="echo \App\Models\User::count();" 2>/dev/null || echo "0")
+if [ "$USER_COUNT" = "0" ]; then
+    echo "First deploy: seeding database..."
+    php artisan db:seed --force
+else
+    echo "Database already seeded ($USER_COUNT users found), updating admin credentials..."
+    php artisan tinker --execute="
+        \$email = env('ADMIN_EMAIL', 'admin@portfolio.com');
+        \$pass = env('ADMIN_PASSWORD', 'changeme123');
+        \$u = \App\Models\User::first();
+        if (\$u) { \$u->update(['email' => \$email, 'password' => \Illuminate\Support\Facades\Hash::make(\$pass)]); }
+        echo 'Admin updated: ' . \$email;
+    " 2>/dev/null || true
+fi
+
+# Clean up duplicate records (one-time fix)
+php artisan tinker --execute="
+    foreach (['App\Models\Project', 'App\Models\Experience', 'App\Models\Service', 'App\Models\Skill', 'App\Models\ContactLink'] as \$model) {
+        \$all = \$model::orderBy('id')->get();
+        \$seen = [];
+        foreach (\$all as \$item) {
+            \$key = \$item->title ?? \$item->role ?? \$item->category ?? \$item->label ?? \$item->number ?? '';
+            if (in_array(\$key, \$seen)) { \$item->delete(); }
+            else { \$seen[] = \$key; }
+        }
+    }
+    echo 'Duplicates cleaned.';
+" 2>/dev/null || true
 
 # NOW cache config & routes for performance
 php artisan config:cache
